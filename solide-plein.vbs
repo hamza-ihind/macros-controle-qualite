@@ -1,4 +1,4 @@
-' solide-plein.vbs — Verifie si tous les corps du Part sont solides et pleins
+' solide-plein.vbs — Verifie si tous les corps sont solides et pleins (CATPart ET CATProduct recursif)
 
 Dim g_oSPA
 Dim g_oPart
@@ -98,14 +98,90 @@ Sub AnalyseBody(oBody)
     End If
 End Sub
 
+' Analyse tous les Bodies d'un PartDocument donne
+Sub AnalysePart(oPartDoc)
+    Dim oBodies
+    Dim i
+
+    On Error Resume Next
+
+    Set g_oPart = oPartDoc.Part
+    If Err.Number <> 0 Then
+        g_sReport = g_sReport & "  [??] " & oPartDoc.Name & " : Part inaccessible — " & Err.Description & Chr(13)
+        g_bAllOK = False
+        Err.Clear
+        Exit Sub
+    End If
+
+    Set g_oSPA = oPartDoc.GetWorkbench("SPAWorkbench")
+    If Err.Number <> 0 Then
+        g_sReport = g_sReport & "  [??] " & g_oPart.Name & " : SPAWorkbench inaccessible — " & Err.Description & Chr(13)
+        g_bAllOK = False
+        Err.Clear
+        Exit Sub
+    End If
+
+    Set oBodies = g_oPart.Bodies
+    If Err.Number <> 0 Then
+        g_sReport = g_sReport & "  [??] " & g_oPart.Name & " : lecture Bodies impossible — " & Err.Description & Chr(13)
+        g_bAllOK = False
+        Err.Clear
+        Exit Sub
+    End If
+
+    If oBodies.Count = 0 Then
+        g_sReport = g_sReport & "  [--] " & g_oPart.Name & " : aucun corps trouve" & Chr(13)
+        Set oBodies = Nothing
+        Exit Sub
+    End If
+
+    g_sReport = g_sReport & "Part   : " & g_oPart.Name & Chr(13)
+    g_sReport = g_sReport & "Corps  : " & oBodies.Count & Chr(13)
+    g_sReport = g_sReport & "-------------------------------" & Chr(13)
+
+    For i = 1 To oBodies.Count
+        Call AnalyseBody(oBodies.Item(i))
+    Next
+
+    g_sReport = g_sReport & "-------------------------------" & Chr(13)
+
+    Set oBodies = Nothing
+End Sub
+
+' Parcours recursif d'un CATProduct — appelle AnalysePart sur chaque feuille CATPart
+Sub WalkProduct(oProd)
+    Dim i
+    Dim oSubDoc
+
+    On Error Resume Next
+
+    If oProd.Products.Count = 0 Then
+        ' Feuille : recuperer le PartDocument associe
+        Err.Clear
+        Set oSubDoc = oProd.ReferenceProduct.Parent
+        If Err.Number <> 0 Then
+            g_sReport = g_sReport & "  [??] " & oProd.Name & " : document inaccessible — " & Err.Description & Chr(13)
+            g_bAllOK = False
+            Err.Clear
+            Exit Sub
+        End If
+        If TypeName(oSubDoc) = "PartDocument" Then
+            Call AnalysePart(oSubDoc)
+        End If
+    Else
+        ' Sous-assemblage : recurser
+        For i = 1 To oProd.Products.Count
+            Call WalkProduct(oProd.Products.Item(i))
+        Next
+    End If
+End Sub
+
 ' Point d'entree principal
 Sub CATMain()
     Dim oDoc
-    Dim oBodies
     Dim iIcon
     Dim bError
     Dim sErrMsg
-    Dim i
 
     On Error Resume Next
     bError  = False
@@ -119,61 +195,26 @@ Sub CATMain()
     End If
 
     If Not bError Then
-        If TypeName(oDoc) <> "PartDocument" Then
-            MsgBox "Le document actif n'est pas un .CATPart." & Chr(13) & _
-                   "Ouvrez un .CATPart avant de lancer la macro.", _
-                   16, "Verification Solide"
-            bError = True
-        End If
-    End If
-
-    If Not bError Then
-        Set g_oPart = oDoc.Part
-        If Err.Number <> 0 Then
-            sErrMsg = "Part inaccessible. Err#" & Err.Number & " : " & Err.Description
-            bError = True
-            Err.Clear
-        End If
-    End If
-
-    If Not bError Then
-        Set g_oSPA = oDoc.GetWorkbench("SPAWorkbench")
-        If Err.Number <> 0 Then
-            sErrMsg = "SPAWorkbench inaccessible. Err#" & Err.Number & " : " & Err.Description
-            bError = True
-            Err.Clear
-        End If
-    End If
-
-    If Not bError Then
-        Set oBodies = g_oPart.Bodies
-        If Err.Number <> 0 Then
-            sErrMsg = "Lecture Bodies impossible. Err#" & Err.Number & " : " & Err.Description
-            bError = True
-            Err.Clear
-        End If
-    End If
-
-    If Not bError Then
-        If oBodies.Count = 0 Then
-            MsgBox "Aucun corps (Body) trouve dans ce Part." & Chr(13) & _
-                   "Ajoutez au moins un Pad ou Shaft.", _
-                   16, "Verification Solide"
-            bError = True
-        End If
-    End If
-
-    If Not bError Then
         g_bAllOK  = True
         g_sReport = "===== VERIFICATION SOLIDE =====" & Chr(13)
-        g_sReport = g_sReport & "Part   : " & g_oPart.Name & Chr(13)
-        g_sReport = g_sReport & "Corps  : " & oBodies.Count & Chr(13)
-        g_sReport = g_sReport & "-------------------------------" & Chr(13)
 
-        For i = 1 To oBodies.Count
-            Call AnalyseBody(oBodies.Item(i))
-        Next
+        If TypeName(oDoc) = "PartDocument" Then
+            Call AnalysePart(oDoc)
 
+        ElseIf TypeName(oDoc) = "ProductDocument" Then
+            g_sReport = g_sReport & "Produit : " & oDoc.Product.Name & Chr(13)
+            g_sReport = g_sReport & "===============================" & Chr(13)
+            Call WalkProduct(oDoc.Product)
+
+        Else
+            MsgBox "Le document actif n'est pas un .CATPart ou un .CATProduct." & Chr(13) & _
+                   "Ouvrez un fichier valide avant de lancer la macro.", _
+                   16, "Verification Solide"
+            bError = True
+        End If
+    End If
+
+    If Not bError Then
         g_sReport = g_sReport & "===============================" & Chr(13)
 
         If g_bAllOK Then
@@ -195,7 +236,6 @@ Sub CATMain()
 
     Set g_oSPA  = Nothing
     Set g_oPart = Nothing
-    Set oBodies = Nothing
     Set oDoc    = Nothing
 
 End Sub
