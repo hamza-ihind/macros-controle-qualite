@@ -1,10 +1,3 @@
-' vrillage.vbs — Detection de vrillage surfacique (Q-Checker)
-' Methode : aire de validation + normale au centroide + comparaison croisee via Reference CATIA + accessibilite du CoG
-'
-' Correction du bug original : GetNormal (SPA) retourne UNE seule normale fixe au centroide,
-' independamment de toute boucle. La boucle 10x10 de la version precedente comparait
-' 100 fois le meme vecteur avec lui-meme — le vrillage n'etait jamais detecte.
-
 Option Explicit
 
 ' ─────────────────────────────────────────────────────────────────────────────
