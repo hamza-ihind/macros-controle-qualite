@@ -1,169 +1,217 @@
 ' ============================================================
-'  DetectSliverFaces.vbs
-'  Detecte les Sliver Faces dans le Part actif
-'  Definition : faces ultra-fines (aire < seuil) creees par
-'  quasi-coincidence geometrique lors de modelisation ou import
-'  Auteur  : PFE Macro — CATIA V5
-'  Usage   : Tools > Macro > Macros > Run
+'  silver_faces.vbs — v1.0
+'  Detecte et corrige les silver faces (surfaces ultra-fines)
+'  Fonctionne sur un .CATPart ou un .CATProduct
+'  Usage : Tools > Macro > Macros > Run
+'
+'  Strategies de correction automatique (ref. Table 4.12) :
+'    [A] aire < SEUIL_DELETE -> Suppression directe
+'          Cas : "Sliver quasi-degeneree (aire ≈ 0)" — Table 4.12, cas 6
+'          Methode : Selection.Delete sur la HybridShape
+'
+'    [B] aire < SEUIL_MM2    -> Healing du corps surfacique parent
+'          Cas : import IGES/STEP, micro-ecart entre surfaces — Table 4.12, cas 1 & 2
+'          Methode : HybridShapeFactory.AddNewHeal sur toutes les surfaces du corps
+'
+'  Strategies NON automatisees (intervention manuelle requise) :
+'    - Face residuelle apres Trim  -> Delete Face + Fill (Table 4.12, cas 3)
+'    - Offset avec forte courbure  -> reduire offset / segmenter (Table 4.12, cas 4)
+'    - Import repete               -> nettoyer dans logiciel source (Table 4.12, cas 5)
 ' ============================================================
 
+Const SEUIL_MM2    = 0.01    ' Seuil de detection (mm2)
+Const SEUIL_DELETE = 0.0001  ' En dessous : suppression directe (quasi-degeneree)
+Const HEALING_DIST = 0.1     ' Distance de fusion pour le Healing (mm)
+
+' ============================================================
 Sub CATMain()
 
-    ' ---- Seuil de detection (en mm2) -----------------------
-    ' Modifier cette valeur selon le contexte du projet :
-    '   0.001 mm2  -> pieces aeronautiques (haute precision)
-    '   0.01  mm2  -> pieces automobiles standard
-    '   0.1   mm2  -> modeles pour impression 3D
-    '   1.0   mm2  -> import IGES/STEP (seuil large)
-    Dim SEUIL_MM2
-    SEUIL_MM2 = 0.01
+    Dim oDoc, iSliver, iTotal, sList, sMsg, iRep, i
+    Set oDoc  = CATIA.ActiveDocument
+    iSliver = 0 : iTotal = 0 : sList = ""
 
-    ' ---- Declaration des variables -------------------------
-    Dim oDoc
-    Dim oPart
-    Dim oSPA
-    Dim oHybridBodies
-    Dim oHybridBody
-    Dim oHybridShapes
-    Dim oShape
-    Dim oRef
-    Dim oMeasure
-    Dim dAire_m2
-    Dim dAire_mm2
-    Dim iNbSliver
-    Dim iNbTotal
-    Dim sListeSliver
-    Dim sMsg
-    Dim iIcon
-    Dim i
-    Dim j
-
-    ' ---- Gestion des erreurs globales ----------------------
     On Error GoTo ErrHandler
 
-    ' ---- 1. Recuperer le document actif --------------------
-    Set oDoc = CATIA.ActiveDocument
+    Select Case TypeName(oDoc)
 
-    ' ---- 2. Verifier que c'est un PartDocument -------------
-    If TypeName(oDoc) <> "PartDocument" Then
-        MsgBox "ERREUR : Le document actif n'est pas un fichier .CATPart." & Chr(13) & Chr(13) & _
-               "Veuillez ouvrir un fichier .CATPart avant de lancer la macro.", _
-               16, "Detection Sliver Faces — PFE"
+        Case "PartDocument"
+            ScanPart oDoc.Part, iSliver, iTotal, sList
+
+        Case "ProductDocument"
+            ' Parcourir tous les Parts ouverts (v1.0 — sans filtrage produit)
+            For i = 1 To CATIA.Documents.Count
+                If TypeName(CATIA.Documents.Item(i)) = "PartDocument" Then
+                    ScanPart CATIA.Documents.Item(i).Part, iSliver, iTotal, sList
+                End If
+            Next i
+
+        Case Else
+            MsgBox "Ouvrez un .CATPart ou .CATProduct.", 16, "Silver Faces"
+            Exit Sub
+
+    End Select
+
+    ' --- Rapport ---
+    sMsg = "=== SILVER FACES ===" & Chr(13) & _
+           "Seuil    : " & SEUIL_MM2 & " mm2" & Chr(13) & _
+           "Surfaces : " & iTotal    & Chr(13) & _
+           "Anomalies: " & iSliver   & Chr(13) & _
+           "===================="
+
+    If iSliver = 0 Then
+        MsgBox sMsg & Chr(13) & Chr(13) & "[OK] Aucune silver face detectee.", _
+               64, "Silver Faces"
         Exit Sub
     End If
 
-    ' ---- 3. Acceder a l'objet Part -------------------------
-    Set oPart = oDoc.Part
+    ' --- Proposer la correction automatique ---
+    iRep = MsgBox(sMsg & Chr(13) & Chr(13) & sList & Chr(13) & _
+                  "Appliquer les corrections automatiques ?", _
+                  36, "Silver Faces")  ' 36 = Oui/Non
 
-    ' ---- 4. Verifier qu'il y a des HybridBodies ------------
-    Set oHybridBodies = oPart.HybridBodies
-
-    If oHybridBodies.Count = 0 Then
-        MsgBox "AVERTISSEMENT : Aucun corps surfacique (HybridBody) detecte." & Chr(13) & Chr(13) & _
-               "Le Part ne contient pas de surfaces GSD a analyser.", _
-               48, "Detection Sliver Faces — PFE"
-        GoTo Nettoyage
+    If iRep = 6 Then  ' vbYes = 6
+        Select Case TypeName(oDoc)
+            Case "PartDocument"
+                CorrigerPart oDoc.Part
+            Case "ProductDocument"
+                For i = 1 To CATIA.Documents.Count
+                    If TypeName(CATIA.Documents.Item(i)) = "PartDocument" Then
+                        CorrigerPart CATIA.Documents.Item(i).Part
+                    End If
+                Next i
+        End Select
     End If
 
-    ' ---- 5. Initialisation des compteurs -------------------
-    iNbSliver    = 0
-    iNbTotal     = 0
-    sListeSliver = ""
+    Exit Sub
 
-    ' ---- 6. Instancier le SPAWorkbench ---------------------
-    Set oSPA = oDoc.GetWorkbench("SPAWorkbench")
+ErrHandler:
+    MsgBox "Erreur #" & Err.Number & " : " & Err.Description & Chr(13) & _
+           "Verifiez que le Part est mis a jour (Ctrl+U).", 16, "Silver Faces"
 
-    ' ---- 7. Boucle sur tous les HybridBodies ---------------
-    For i = 1 To oHybridBodies.Count
+End Sub
 
-        Set oHybridBody   = oHybridBodies.Item(i)
-        Set oHybridShapes = oHybridBody.HybridShapes
+' ============================================================
+' Scanne toutes les HybridShapes d'un Part et signale les slivers.
+' Indique pour chaque anomalie quelle strategie sera appliquee.
+Sub ScanPart(oPart, iSliver, iTotal, sList)
 
-        ' ---- 8. Boucle sur chaque surface du HybridBody ----
-        For j = 1 To oHybridShapes.Count
+    Dim oSPA, oHBs, oHB, oShape, oRef, oM, dAire, sStrat, i, j
 
-            Set oShape = oHybridShapes.Item(j)
-            iNbTotal   = iNbTotal + 1
+    Set oSPA = oPart.Parent.GetWorkbench("SPAWorkbench")
+    Set oHBs = oPart.HybridBodies
 
-            ' ---- 9. Tenter la mesure (On Error Resume Next)
+    For i = 1 To oHBs.Count
+        Set oHB = oHBs.Item(i)
+        For j = 1 To oHB.HybridShapes.Count
+            Set oShape = oHB.HybridShapes.Item(j)
+            iTotal = iTotal + 1
+            dAire  = 0
+
             On Error Resume Next
-            Set oRef     = oPart.CreateReferenceFromObject(oShape)
-            Set oMeasure = oSPA.GetMeasurable(oRef)
+            Set oRef = oPart.CreateReferenceFromObject(oShape)
+            Set oM   = oSPA.GetMeasurable(oRef)
+            dAire    = oM.Area * 1000000  ' m2 -> mm2
+            On Error GoTo 0
 
-            ' Recuperer l'aire brute en m2
-            dAire_m2  = 0
-            dAire_m2  = oMeasure.Area
+            If dAire > 0 And dAire < SEUIL_MM2 Then
+                iSliver = iSliver + 1
 
-            On Error GoTo ErrHandler
+                ' Indiquer la strategie qui sera appliquee lors de la correction
+                If dAire < SEUIL_DELETE Then
+                    sStrat = "[A] Suppression"   ' Table 4.12, cas 6 : quasi-degeneree
+                Else
+                    sStrat = "[B] Healing"        ' Table 4.12, cas 1/2 : sliver standard
+                End If
 
-            ' ---- 10. Convertir m2 -> mm2 (x 10^6) ----------
-            dAire_mm2 = dAire_m2 * 1000000
-
-            ' ---- 11. Comparer au seuil ---------------------
-            If dAire_mm2 > 0 And dAire_mm2 < SEUIL_MM2 Then
-
-                iNbSliver = iNbSliver + 1
-
-                ' Stocker le nom + aire + body parent
-                sListeSliver = sListeSliver & _
-                    "  [" & iNbSliver & "] " & oShape.Name & _
-                    " (HybridBody: " & oHybridBody.Name & ")" & _
-                    " — Aire = " & FormatNumber(dAire_mm2, 6) & " mm2" & Chr(13)
-
+                sList = sList & iSliver & ". " & oShape.Name & _
+                        " (" & oPart.Name & "/" & oHB.Name & ")" & _
+                        " = " & FormatNumber(dAire, 6) & " mm2  " & sStrat & Chr(13)
             End If
+        Next j
+    Next i
 
-            ' ---- Nettoyage des objets de mesure ------------
-            Set oMeasure = Nothing
-            Set oRef     = Nothing
-            Set oShape   = Nothing
+End Sub
 
+' ============================================================
+' Applique les corrections sur un Part :
+'
+'   Strategie [A] — Table 4.12, cas 6 (aire quasi-nulle)
+'     -> Selection.Delete : supprime directement la HybridShape
+'     -> Iteration en sens inverse pour eviter les decalages d'index
+'
+'   Strategie [B] — Table 4.12, cas 1 & 2 (sliver standard)
+'     -> HybridShapeHealing : cree un feature Healing sur le corps parent
+'        en ajoutant toutes ses surfaces, avec une distance de fusion HEALING_DIST
+'     -> Equivalent a : Insert > Operations > Healing dans l'interface CATIA
+Sub CorrigerPart(oPart)
+
+    Dim oSPA, oHSF, oHBs, oHB, oShape, oRef, oM, oHeal
+    Dim dAire, i, j, k, iDel, iHeal, sLog, bNeedHeal
+
+    Set oSPA = oPart.Parent.GetWorkbench("SPAWorkbench")
+    Set oHSF = oPart.HybridShapeFactory
+    Set oHBs = oPart.HybridBodies
+    iDel = 0 : iHeal = 0 : sLog = ""
+
+    For i = 1 To oHBs.Count
+        Set oHB   = oHBs.Item(i)
+        bNeedHeal = False
+
+        ' --- Strategie [A] : suppression des faces quasi-degenerees ---
+        ' Sens inverse pour ne pas perturber les index apres chaque Delete
+        For j = oHB.HybridShapes.Count To 1 Step -1
+            Set oShape = oHB.HybridShapes.Item(j)
+            dAire = 0
+            On Error Resume Next
+            Set oRef = oPart.CreateReferenceFromObject(oShape)
+            Set oM   = oSPA.GetMeasurable(oRef)
+            dAire    = oM.Area * 1000000
+            On Error GoTo 0
+
+            If dAire > 0 And dAire < SEUIL_DELETE Then
+                ' Suppression via Selection (Table 4.12, cas 6)
+                On Error Resume Next
+                oPart.Parent.Selection.Clear
+                oPart.Parent.Selection.Add oShape
+                oPart.Parent.Selection.Delete
+                On Error GoTo 0
+                iDel = iDel + 1
+                sLog = sLog & "[A-SUPPRIME] " & oShape.Name & _
+                       " (" & FormatNumber(dAire, 6) & " mm2)" & Chr(13)
+
+            ElseIf dAire > 0 And dAire < SEUIL_MM2 Then
+                ' Sliver standard -> le corps sera traite par Healing
+                bNeedHeal = True
+            End If
         Next j
 
-        Set oHybridShapes = Nothing
-        Set oHybridBody   = Nothing
+        ' --- Strategie [B] : Healing du corps surfacique parent ---
+        ' Cree un feature "Heal" regroupant toutes les surfaces du corps.
+        ' Le Healing comble les micro-ecarts entre surfaces adjacentes.
+        If bNeedHeal Then
+            On Error Resume Next
+            Set oHeal = oHSF.AddNewHeal()
+            For k = 1 To oHB.HybridShapes.Count
+                Set oRef = oPart.CreateReferenceFromObject(oHB.HybridShapes.Item(k))
+                oHeal.AddElement oRef
+            Next k
+            oHeal.MergingDistance = HEALING_DIST  ' distance de fusion en mm
+            oHB.AppendHybridShape oHeal
+            oPart.Update
+            On Error GoTo 0
+            iHeal = iHeal + 1
+            sLog = sLog & "[B-HEALING]  " & oHB.Name & _
+                   " (dist=" & HEALING_DIST & " mm)" & Chr(13)
+        End If
 
     Next i
 
-    ' ---- 12. Construire le rapport -------------------------
-    sMsg = "======= RAPPORT — SLIVER FACES =======" & Chr(13)
-    sMsg = sMsg & "Part          : " & oPart.Name               & Chr(13)
-    sMsg = sMsg & "Surfaces anal.: " & iNbTotal                 & Chr(13)
-    sMsg = sMsg & "Seuil utilise : " & SEUIL_MM2 & " mm2"      & Chr(13)
-    sMsg = sMsg & "Sliver faces  : " & iNbSliver                & Chr(13)
-    sMsg = sMsg & "======================================" & Chr(13)
-
-    ' ---- 13. Verdict final ---------------------------------
-    If iNbSliver = 0 Then
-        sMsg  = sMsg & "[OK]  Aucune Sliver Face detectee." & Chr(13) & _
-                "      Toutes les surfaces sont au-dessus du seuil."
-        iIcon = 64
-    Else
-        sMsg  = sMsg & "[!!]  " & iNbSliver & " Sliver Face(s) detectee(s) :" & Chr(13) & Chr(13) & _
-                sListeSliver & Chr(13) & _
-                "Action recommandee :" & Chr(13) & _
-                "  - Insert > Operations > Healing" & Chr(13) & _
-                "  - Ou reconstruire la zone avec Fill / Blend" & Chr(13) & _
-                "  - Ou augmenter la tolerance du Join"
-        iIcon = 48
-    End If
-
-    ' ---- 14. Afficher le rapport ---------------------------
-    MsgBox sMsg, iIcon, "Detection Sliver Faces — PFE"
-
-Nettoyage:
-    ' ---- 15. Liberation memoire ----------------------------
-    Set oSPA          = Nothing
-    Set oHybridBodies = Nothing
-    Set oPart         = Nothing
-    Set oDoc          = Nothing
-    Exit Sub
-
-' ---- Gestionnaire d'erreurs --------------------------------
-ErrHandler:
-    MsgBox "Erreur inattendue (#" & Err.Number & ") :" & Chr(13) & Chr(13) & _
-           Err.Description & Chr(13) & Chr(13) & _
-           "Verifiez que le Part est bien mis a jour (Ctrl+U).", _
-           16, "Detection Sliver Faces — PFE"
-    Resume Nettoyage
+    MsgBox "Corrections sur : " & oPart.Name & Chr(13) & Chr(13) & _
+           "[A] Suppressions : " & iDel  & Chr(13) & _
+           "[B] Healings     : " & iHeal & Chr(13) & Chr(13) & sLog & Chr(13) & _
+           "Strategies non automatisees (manuel) :" & Chr(13) & _
+           "  - Face apres Trim  -> Delete Face + Fill" & Chr(13) & _
+           "  - Offset / Import  -> voir logiciel source", _
+           64, "Silver Faces — Corrections"
 
 End Sub
