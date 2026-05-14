@@ -31,7 +31,6 @@ Sub AnalyseBody(oBody)
         Exit Sub
     End If
 
-    ' Creer une Reference pour GetMeasurable
     Err.Clear
     Set oRef = g_oPart.CreateReferenceFromObject(oBody)
     If Err.Number <> 0 Then

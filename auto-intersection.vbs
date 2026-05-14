@@ -2,6 +2,7 @@ Dim gTotal As Integer
 Dim gFailed As Integer
 Dim gReport As String
 
+' Entry point: detects auto-intersecting surfaces in the active document.
 Sub CATMain()
     Dim oDoc As Document
     Dim sType As String
@@ -31,6 +32,7 @@ Sub CATMain()
     End If
 End Sub
 
+' Recursively scans a Product tree and processes each Part found.
 Sub ScanProduct(oProd As Product)
     Dim i      As Integer
     Dim oChild As Product
@@ -52,12 +54,14 @@ Sub ScanProduct(oProd As Product)
     Next
 End Sub
 
+' Processes a Part's HybridBodies for auto-intersection checks.
 Sub ProcessPart(oPart As Part)
     If oPart.HybridBodies.Count > 0 Then
         ScanHybridBodies oPart.HybridBodies, oPart
     End If
 End Sub
 
+' Iterates all HybridShapes (including nested bodies) and checks each one.
 Sub ScanHybridBodies(oHBs As HybridBodies, oPart As Part)
     Dim oHB As HybridBody
     Dim k   As Integer
@@ -74,6 +78,7 @@ Sub ScanHybridBodies(oHBs As HybridBodies, oPart As Part)
     Next
 End Sub
 
+' Checks a single surface for auto-intersection using a temporary Join feature.
 Sub CheckSurface(oHS As HybridShape, oPart As Part)
     Dim oSPA    As SPAWorkbench
     Dim oRef    As Reference

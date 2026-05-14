@@ -1,29 +1,8 @@
-' ============================================================
-'  silver_faces.vbs — v1.0
-'  Detecte et corrige les silver faces (surfaces ultra-fines)
-'  Fonctionne sur un .CATPart ou un .CATProduct
-'  Usage : Tools > Macro > Macros > Run
-'
-'  Strategies de correction automatique (ref. Table 4.12) :
-'    [A] aire < SEUIL_DELETE -> Suppression directe
-'          Cas : "Sliver quasi-degeneree (aire ≈ 0)" — Table 4.12, cas 6
-'          Methode : Selection.Delete sur la HybridShape
-'
-'    [B] aire < SEUIL_MM2    -> Healing du corps surfacique parent
-'          Cas : import IGES/STEP, micro-ecart entre surfaces — Table 4.12, cas 1 & 2
-'          Methode : HybridShapeFactory.AddNewHeal sur toutes les surfaces du corps
-'
-'  Strategies NON automatisees (intervention manuelle requise) :
-'    - Face residuelle apres Trim  -> Delete Face + Fill (Table 4.12, cas 3)
-'    - Offset avec forte courbure  -> reduire offset / segmenter (Table 4.12, cas 4)
-'    - Import repete               -> nettoyer dans logiciel source (Table 4.12, cas 5)
-' ============================================================
+Const SEUIL_MM2    = 0.01
+Const SEUIL_DELETE = 0.0001
+Const HEALING_DIST = 0.1
 
-Const SEUIL_MM2    = 0.01    ' Seuil de detection (mm2)
-Const SEUIL_DELETE = 0.0001  ' En dessous : suppression directe (quasi-degeneree)
-Const HEALING_DIST = 0.1     ' Distance de fusion pour le Healing (mm)
-
-' ============================================================
+' Entry point: scans the active document for silver faces and offers auto-correction.
 Sub CATMain()
 
     Dim oDoc, iSliver, iTotal, sList, sMsg, iRep, i
@@ -38,7 +17,6 @@ Sub CATMain()
             ScanPart oDoc.Part, iSliver, iTotal, sList
 
         Case "ProductDocument"
-            ' Parcourir tous les Parts ouverts (v1.0 — sans filtrage produit)
             For i = 1 To CATIA.Documents.Count
                 If TypeName(CATIA.Documents.Item(i)) = "PartDocument" Then
                     ScanPart CATIA.Documents.Item(i).Part, iSliver, iTotal, sList
@@ -90,9 +68,7 @@ ErrHandler:
 
 End Sub
 
-' ============================================================
-' Scanne toutes les HybridShapes d'un Part et signale les slivers.
-' Indique pour chaque anomalie quelle strategie sera appliquee.
+' Scans all HybridShapes in a Part and flags silver faces.
 Sub ScanPart(oPart, iSliver, iTotal, sList)
 
     Dim oSPA, oHBs, oHB, oShape, oRef, oM, dAire, sStrat, i, j
@@ -116,11 +92,11 @@ Sub ScanPart(oPart, iSliver, iTotal, sList)
             If dAire > 0 And dAire < SEUIL_MM2 Then
                 iSliver = iSliver + 1
 
-                ' Indiquer la strategie qui sera appliquee lors de la correction
+                ' Pick correction strategy based on area size
                 If dAire < SEUIL_DELETE Then
-                    sStrat = "[A] Suppression"   ' Table 4.12, cas 6 : quasi-degeneree
+                    sStrat = "[A] Suppression"
                 Else
-                    sStrat = "[B] Healing"        ' Table 4.12, cas 1/2 : sliver standard
+                    sStrat = "[B] Healing"
                 End If
 
                 sList = sList & iSliver & ". " & oShape.Name & _
@@ -132,17 +108,7 @@ Sub ScanPart(oPart, iSliver, iTotal, sList)
 
 End Sub
 
-' ============================================================
-' Applique les corrections sur un Part :
-'
-'   Strategie [A] — Table 4.12, cas 6 (aire quasi-nulle)
-'     -> Selection.Delete : supprime directement la HybridShape
-'     -> Iteration en sens inverse pour eviter les decalages d'index
-'
-'   Strategie [B] — Table 4.12, cas 1 & 2 (sliver standard)
-'     -> HybridShapeHealing : cree un feature Healing sur le corps parent
-'        en ajoutant toutes ses surfaces, avec une distance de fusion HEALING_DIST
-'     -> Equivalent a : Insert > Operations > Healing dans l'interface CATIA
+' Corrects silver faces: deletes near-zero area shapes [A], applies Healing to the rest [B].
 Sub CorrigerPart(oPart)
 
     Dim oSPA, oHSF, oHBs, oHB, oShape, oRef, oM, oHeal
@@ -157,8 +123,6 @@ Sub CorrigerPart(oPart)
         Set oHB   = oHBs.Item(i)
         bNeedHeal = False
 
-        ' --- Strategie [A] : suppression des faces quasi-degenerees ---
-        ' Sens inverse pour ne pas perturber les index apres chaque Delete
         For j = oHB.HybridShapes.Count To 1 Step -1
             Set oShape = oHB.HybridShapes.Item(j)
             dAire = 0
@@ -168,8 +132,8 @@ Sub CorrigerPart(oPart)
             dAire    = oM.Area * 1000000
             On Error GoTo 0
 
+            ' [A] Delete quasi-null area shape
             If dAire > 0 And dAire < SEUIL_DELETE Then
-                ' Suppression via Selection (Table 4.12, cas 6)
                 On Error Resume Next
                 oPart.Parent.Selection.Clear
                 oPart.Parent.Selection.Add oShape
@@ -180,14 +144,11 @@ Sub CorrigerPart(oPart)
                        " (" & FormatNumber(dAire, 6) & " mm2)" & Chr(13)
 
             ElseIf dAire > 0 And dAire < SEUIL_MM2 Then
-                ' Sliver standard -> le corps sera traite par Healing
                 bNeedHeal = True
             End If
         Next j
 
-        ' --- Strategie [B] : Healing du corps surfacique parent ---
-        ' Cree un feature "Heal" regroupant toutes les surfaces du corps.
-        ' Le Healing comble les micro-ecarts entre surfaces adjacentes.
+        ' [B] Create a Healing feature on the body if any sliver was found
         If bNeedHeal Then
             On Error Resume Next
             Set oHeal = oHSF.AddNewHeal()
@@ -195,7 +156,7 @@ Sub CorrigerPart(oPart)
                 Set oRef = oPart.CreateReferenceFromObject(oHB.HybridShapes.Item(k))
                 oHeal.AddElement oRef
             Next k
-            oHeal.MergingDistance = HEALING_DIST  ' distance de fusion en mm
+            oHeal.MergingDistance = HEALING_DIST
             oHB.AppendHybridShape oHeal
             oPart.Update
             On Error GoTo 0
@@ -213,5 +174,4 @@ Sub CorrigerPart(oPart)
            "  - Face apres Trim  -> Delete Face + Fill" & Chr(13) & _
            "  - Offset / Import  -> voir logiciel source", _
            64, "Silver Faces — Corrections"
-
 End Sub

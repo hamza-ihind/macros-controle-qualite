@@ -1,3 +1,4 @@
+' Entry point: checks naming convention (XXX-0000) on the active document.
 Sub CATMain()
     Dim oDoc
     Set oDoc = CATIA.ActiveDocument
@@ -8,7 +9,7 @@ Sub CATMain()
     Dim docType
     docType = TypeName(oDoc)
     
-    ' ── Handle CATPart ──────────────────────────────────────────
+    ' Handle CATPart
     If docType = "PartDocument" Then
         Dim oPart
         Set oPart = oDoc.Part
@@ -22,7 +23,7 @@ Sub CATMain()
             errorReport = "- " & oPart.Name
         End If
         
-    ' ── Handle CATProduct ───────────────────────────────────────
+    ' Handle CATProduct
     ElseIf docType = "ProductDocument" Then
         Dim rootProd
         Set rootProd = oDoc.Product
@@ -33,7 +34,7 @@ Sub CATMain()
         Exit Sub
     End If
     
-    ' ── Report ──────────────────────────────────────────────────
+    ' Report
     If errorReport = "" Then
         MsgBox "Succès : Tous les éléments respectent la convention de nommage!", vbInformation, "Contrôle Qualité"
     Else
@@ -47,6 +48,7 @@ Sub CATMain()
     End If
 End Sub
 
+' Recursively checks naming convention on a Product and all its children.
 Sub CheckNamingConvention(currentProd, ByRef errorReport)
     Dim regEx
     Set regEx = CreateObject("VBScript.RegExp")
