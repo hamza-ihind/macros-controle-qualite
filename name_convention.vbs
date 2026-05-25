@@ -19,8 +19,7 @@ Sub CATMain()
         rootComment = oDoc.Product.Comment
 
     Else
-        MsgBox "Unsupported document. Open a CATPart or CATProduct.", _
-               vbExclamation, "Invalid Type"
+        MsgBox "Open a CATPart or CATProduct.", vbExclamation, "Invalid Document"
         Exit Sub
     End If
 
@@ -40,32 +39,20 @@ Sub CATMain()
 
     Dim nameStatus, commentStatus
     If nameOK Then
-        nameStatus = "[OK]  Compliant"
+        nameStatus = "[OK]"
     Else
-        nameStatus = "[!!] NOT Compliant"
+        nameStatus = "[!!] NOT compliant"
     End If
 
     If commentOK Then
-        commentStatus = "[OK]  Compliant  —  SE316_PA2 detected"
+        commentStatus = "[OK]"
     Else
-        commentStatus = "[!!] NOT Compliant  —  SE316_PA2 missing"
+        commentStatus = "[!!] SE316_PA2 missing"
     End If
 
     Dim report
-    report = "────────────────────────────────────────────" & L & _
-             "  PART NUMBER" & L & _
-             "────────────────────────────────────────────" & L & _
-             "  Detected  :  " & rootName & L & _
-             "  Status    :  " & nameStatus & L & _
-             "  Should be :  KVScode_CADTYPE_PDA_VERSION_DESCRIPTION" & L & _
-             "  e.g.         5FF821105H_PCA_TM_5_FENDER_PHEV" & L & L & _
-             "────────────────────────────────────────────" & L & _
-             "  COMMENT" & L & _
-             "────────────────────────────────────────────" & L & _
-             "  Detected  :  " & rootComment & L & _
-             "  Status    :  " & commentStatus & L & _
-             "  Should be :  SE316_PA2_[STATUS]_[DATE]" & L & _
-             "  e.g.         SE316_PA2_WIP_250905"
+    report = "Part Number: " & rootName & "  " & nameStatus & L & _
+             "Comment:     " & rootComment & "  " & commentStatus
 
     If nameOK And commentOK Then
         MsgBox report, vbInformation, "Naming Convention — OK"

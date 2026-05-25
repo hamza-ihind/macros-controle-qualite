@@ -27,15 +27,12 @@ Sub CATMain()
         Next
 
     Else
-        MsgBox "Unsupported document. Open a CATPart or CATProduct.", _
-               vbExclamation, "Invalid Type"
+        MsgBox "Open a CATPart or CATProduct.", vbExclamation, "Invalid Document"
         Exit Sub
     End If
 
     If oDesignWork Is Nothing Then
-        MsgBox "Could not find a Geometric Set named 'Design_Work' in the tree." & vbCrLf & _
-               "Make sure the set exists and is named exactly 'Design_Work'.", _
-               vbExclamation, "Design_Work Not Found"
+        MsgBox "Design_Work not found in the tree.", vbExclamation, "Design_Work Not Found"
         Exit Sub
     End If
 
@@ -47,18 +44,13 @@ Sub CATMain()
     Call ScanForDatums(oDesignWork, "Design_Work", report, count, oSel)
 
     Dim L
-    L = vbCrLf
+    L = vbCrLf & vbCrLf
 
     If count = 0 Then
-        MsgBox "No DATUM (Élément mort / Élément Isolé) found inside 'Design_Work'." & L & _
-               "All features have an active construction history.", _
-               vbInformation, "Datum Check — OK"
+        MsgBox "No datum found. All features are active.", vbInformation, "Datum Check (OK)"
     Else
-        MsgBox count & " DATUM (Élément mort / Élément Isolé) detected inside 'Design_Work'" & L & _
-               "(all highlighted in the tree)" & L & _
-               "────────────────────────────────────────────" & L & L & _
-               report, _
-               vbCritical, "Datum Check — " & count & " Issue(s) Found"
+        MsgBox count & " datum found in Design_Work:" & L & L & report, _
+               vbCritical, "Datum Check — " & count & " Issue"
     End If
 End Sub
 
@@ -101,9 +93,7 @@ Sub ScanForDatums(oHB, currentPath, ByRef report, ByRef count, oSel)
             tName = TypeName(oShape)
             If InStr(1, tName, "Datum", vbBinaryCompare) > 0 Then
                 count = count + 1
-                report = report & _
-                    "  [" & count & "]  " & oShape.Name & "  (" & tName & ")" & vbCrLf & _
-                    "        Path : " & currentPath & " > " & oShape.Name & vbCrLf & vbCrLf
+                report = report & "[" & count & "] " & oShape.Name & " — " & currentPath & vbCrLf
                 On Error Resume Next
                 oSel.Add oShape
                 On Error GoTo 0
