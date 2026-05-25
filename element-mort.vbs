@@ -50,7 +50,7 @@ Sub CATMain()
         MsgBox "No datum found. All features are active.", vbInformation, "Datum Check (OK)"
     Else
         MsgBox count & " datum found in Design_Work:" & L & L & report, _
-               vbCritical, "Datum Check — " & count & " Issue"
+               vbCritical, "Datum Check -" & count & " Issue"
     End If
 End Sub
 

@@ -1,33 +1,48 @@
-' solide-plein.vbs — Verifie si tous les corps sont solides et pleins (CATPart ET CATProduct recursif)
-
 Dim g_oSPA
 Dim g_oPart
+Dim g_oMainDoc
 Dim g_sReport
 Dim g_bAllOK
+Dim g_iTotal
+Dim g_iBad
 
-' Analyse un Body : volume, surface, diagnostic si KO
+Sub HighlightBody(oBody)
+    Dim oVP
+    On Error Resume Next
+    g_oMainDoc.Selection.Add oBody
+    Set oVP = g_oMainDoc.Selection.VisProperties
+    oVP.SetRealColor 255, 128, 0, 0
+    Set oVP = Nothing
+    Err.Clear
+End Sub
+
 Sub AnalyseBody(oBody)
-    Dim oRef
-    Dim oMeasure
-    Dim dVol_mm3
-    Dim dArea_mm2
-    Dim nShapes
-    Dim sStatus
+    Dim oRef, oMeasure, dVol_mm3, nShapes, sName, sPad
+
+    sName = oBody.Name
+    If Len(sName) < 40 Then
+        sPad = Space(40 - Len(sName))
+    Else
+        sPad = " "
+    End If
+
+    g_iTotal = g_iTotal + 1
 
     On Error Resume Next
 
     Err.Clear
     nShapes = oBody.Shapes.Count
     If Err.Number <> 0 Then
-        g_sReport = g_sReport & "  [??] " & oBody.Name & " : lecture impossible — " & Err.Description & Chr(13)
-        g_bAllOK = False
-        Err.Clear
-        Exit Sub
+        g_sReport = g_sReport & "  " & sName & sPad & "-->  Lecture impossible" & vbCrLf
+        g_bAllOK = False : g_iBad = g_iBad + 1
+        HighlightBody oBody
+        Err.Clear : Exit Sub
     End If
 
     If nShapes = 0 Then
-        g_sReport = g_sReport & "  [--] " & oBody.Name & " : vide (0 feature)" & Chr(13)
-        g_bAllOK = False
+        g_sReport = g_sReport & "  " & sName & sPad & "-->  Corps vide" & vbCrLf
+        g_bAllOK = False : g_iBad = g_iBad + 1
+        HighlightBody oBody
         Exit Sub
     End If
 
@@ -35,206 +50,151 @@ Sub AnalyseBody(oBody)
     Set oRef = g_oPart.CreateReferenceFromObject(oBody)
     If Err.Number <> 0 Then
         Err.Clear
-        Set oMeasure = g_oSPA.GetMeasurable(oBody)   ' fallback
+        Set oMeasure = g_oSPA.GetMeasurable(oBody)
     Else
         Set oMeasure = g_oSPA.GetMeasurable(oRef)
     End If
 
     If Err.Number <> 0 Then
-        g_sReport = g_sReport & "  [??] " & oBody.Name & " : mesure impossible — " & Err.Description & Chr(13) & _
-                    "         -> Ctrl+U pour mettre le Part a jour." & Chr(13)
-        g_bAllOK = False
-        Err.Clear
-        Exit Sub
+        g_sReport = g_sReport & "  " & sName & sPad & "-->  Mesure impossible" & vbCrLf
+        g_bAllOK = False : g_iBad = g_iBad + 1
+        HighlightBody oBody
+        Err.Clear : Exit Sub
     End If
 
     Err.Clear
     dVol_mm3 = oMeasure.Volume * 1000000000
-    If Err.Number <> 0 Then
-        g_sReport = g_sReport & "  [??] " & oBody.Name & " : volume illisible — " & Err.Description & Chr(13)
-        g_bAllOK = False
-        Err.Clear
-        Set oMeasure = Nothing
-        Exit Sub
-    End If
-
-    Err.Clear
-    dArea_mm2 = oMeasure.Area * 1000000
-    If Err.Number <> 0 Then
-        dArea_mm2 = 0
-        Err.Clear
-    End If
     Set oMeasure = Nothing
 
-    If dVol_mm3 > 0 Then
-        sStatus = "[OK]"
-    Else
-        sStatus  = "[!!]"
-        g_bAllOK = False
+    If Err.Number <> 0 Then
+        g_sReport = g_sReport & "  " & sName & sPad & "-->  Volume illisible" & vbCrLf
+        g_bAllOK = False : g_iBad = g_iBad + 1
+        HighlightBody oBody
+        Err.Clear : Exit Sub
     End If
-
-    g_sReport = g_sReport & "  " & sStatus & " " & oBody.Name                              & Chr(13)
-    g_sReport = g_sReport & "       Features : " & nShapes                                 & Chr(13)
-    g_sReport = g_sReport & "       Volume   : " & FormatNumber(dVol_mm3,  3) & " mm3"     & Chr(13)
-    g_sReport = g_sReport & "       Surface  : " & FormatNumber(dArea_mm2, 3) & " mm2"     & Chr(13)
 
     If dVol_mm3 <= 0 Then
-        g_sReport = g_sReport & "       --- DIAGNOSTIC ---" & Chr(13)
-        Err.Clear
-        g_oPart.Update
-        If Err.Number <> 0 Then
-            g_sReport = g_sReport & "       [!] Mise a jour echouee : " & Err.Description & Chr(13) & _
-                        "           -> Verifiez les features en rouge/jaune." & Chr(13)
-            Err.Clear
-        Else
-            g_sReport = g_sReport & "       [!] Volume nul. Causes possibles :" & Chr(13) & _
-                        "           - Pocket annulant le solide" & Chr(13) & _
-                        "           - Sketch auto-intersecte" & Chr(13) & _
-                        "           - Corps ouvert / face manquante" & Chr(13) & _
-                        "           - Shaft a 0 degre" & Chr(13) & _
-                        "           -> Analyze > Check Geometry" & Chr(13)
-        End If
+        g_sReport = g_sReport & "  " & sName & sPad & "-->  Non solide" & vbCrLf
+        g_bAllOK = False : g_iBad = g_iBad + 1
+        HighlightBody oBody
     End If
+
 End Sub
 
-' Analyse tous les Bodies d'un PartDocument donne
 Sub AnalysePart(oPartDoc)
-    Dim oBodies
-    Dim i
+    Dim oBodies, i, iBadBefore, iLen, sNew
 
     On Error Resume Next
 
     Set g_oPart = oPartDoc.Part
     If Err.Number <> 0 Then
-        g_sReport = g_sReport & "  [??] " & oPartDoc.Name & " : Part inaccessible — " & Err.Description & Chr(13)
+        g_sReport = g_sReport & "  " & oPartDoc.Name & Space(20) & "-->  Part inaccessible" & vbCrLf
         g_bAllOK = False
-        Err.Clear
-        Exit Sub
+        Err.Clear : Exit Sub
     End If
 
     Set g_oSPA = oPartDoc.GetWorkbench("SPAWorkbench")
     If Err.Number <> 0 Then
-        g_sReport = g_sReport & "  [??] " & g_oPart.Name & " : SPAWorkbench inaccessible — " & Err.Description & Chr(13)
+        g_sReport = g_sReport & "  " & g_oPart.Name & Space(20) & "-->  SPA inaccessible" & vbCrLf
         g_bAllOK = False
-        Err.Clear
-        Exit Sub
+        Err.Clear : Exit Sub
     End If
 
     Set oBodies = g_oPart.Bodies
-    If Err.Number <> 0 Then
-        g_sReport = g_sReport & "  [??] " & g_oPart.Name & " : lecture Bodies impossible — " & Err.Description & Chr(13)
-        g_bAllOK = False
+    If Err.Number <> 0 Or oBodies.Count = 0 Then
         Err.Clear
-        Exit Sub
+        Set oBodies = Nothing : Exit Sub
     End If
 
-    If oBodies.Count = 0 Then
-        g_sReport = g_sReport & "  [--] " & g_oPart.Name & " : aucun corps trouve" & Chr(13)
-        Set oBodies = Nothing
-        Exit Sub
-    End If
-
-    g_sReport = g_sReport & "Part   : " & g_oPart.Name & Chr(13)
-    g_sReport = g_sReport & "Corps  : " & oBodies.Count & Chr(13)
-    g_sReport = g_sReport & "-------------------------------" & Chr(13)
+    iBadBefore = g_iBad
+    iLen       = Len(g_sReport)
 
     For i = 1 To oBodies.Count
-        Call AnalyseBody(oBodies.Item(i))
+        AnalyseBody oBodies.Item(i)
     Next
 
-    g_sReport = g_sReport & "-------------------------------" & Chr(13)
+    If g_iBad > iBadBefore Then
+        sNew      = Mid(g_sReport, iLen + 1)
+        g_sReport = Left(g_sReport, iLen) & g_oPart.Name & vbCrLf & String(52, "-") & vbCrLf & sNew
+    End If
 
     Set oBodies = Nothing
 End Sub
 
-' Parcours recursif d'un CATProduct — appelle AnalysePart sur chaque feuille CATPart
 Sub WalkProduct(oProd)
-    Dim i
-    Dim oSubDoc
+    Dim i, oSubDoc
 
     On Error Resume Next
 
     If oProd.Products.Count = 0 Then
-        ' Feuille : recuperer le PartDocument associe
         Err.Clear
         Set oSubDoc = oProd.ReferenceProduct.Parent
         If Err.Number <> 0 Then
-            g_sReport = g_sReport & "  [??] " & oProd.Name & " : document inaccessible — " & Err.Description & Chr(13)
+            g_sReport = g_sReport & "  " & oProd.Name & Space(20) & "-->  Document inaccessible" & vbCrLf
             g_bAllOK = False
-            Err.Clear
-            Exit Sub
+            Err.Clear : Exit Sub
         End If
         If TypeName(oSubDoc) = "PartDocument" Then
-            Call AnalysePart(oSubDoc)
+            AnalysePart oSubDoc
         End If
     Else
-        ' Sous-assemblage : recurser
         For i = 1 To oProd.Products.Count
-            Call WalkProduct(oProd.Products.Item(i))
+            WalkProduct oProd.Products.Item(i)
         Next
     End If
 End Sub
 
-' Point d'entree principal
 Sub CATMain()
-    Dim oDoc
-    Dim iIcon
-    Dim bError
-    Dim sErrMsg
+    Dim oDoc, sSep, sHeader
 
     On Error Resume Next
-    bError  = False
-    sErrMsg = ""
 
     Set oDoc = CATIA.ActiveDocument
     If Err.Number <> 0 Then
-        sErrMsg = "Document actif inaccessible. Err#" & Err.Number & " : " & Err.Description
-        bError = True
-        Err.Clear
+        MsgBox "Document actif inaccessible. Verifiez que CATIA est pret.", _
+               vbCritical, "Verification Solide"
+        Exit Sub
     End If
 
-    If Not bError Then
-        g_bAllOK  = True
-        g_sReport = "===== VERIFICATION SOLIDE =====" & Chr(13)
+    Set g_oMainDoc = oDoc
+    g_bAllOK  = True
+    g_sReport = ""
+    g_iTotal  = 0
+    g_iBad    = 0
+    sSep      = String(52, "-") & vbCrLf
 
-        If TypeName(oDoc) = "PartDocument" Then
-            Call AnalysePart(oDoc)
+    g_oMainDoc.Selection.Clear
 
-        ElseIf TypeName(oDoc) = "ProductDocument" Then
-            g_sReport = g_sReport & "Produit : " & oDoc.Product.Name & Chr(13)
-            g_sReport = g_sReport & "===============================" & Chr(13)
-            Call WalkProduct(oDoc.Product)
+    Select Case TypeName(oDoc)
+        Case "PartDocument"
+            AnalysePart oDoc
+        Case "ProductDocument"
+            WalkProduct oDoc.Product
+        Case Else
+            MsgBox "Type de document non pris en charge." & vbCrLf & _
+                   "Veuillez ouvrir un fichier CATPart ou CATProduct.", _
+                   vbExclamation, "Verification Solide"
+            Exit Sub
+    End Select
 
-        Else
-            MsgBox "Le document actif n'est pas un .CATPart ou un .CATProduct." & Chr(13) & _
-                   "Ouvrez un fichier valide avant de lancer la macro.", _
-                   16, "Verification Solide"
-            bError = True
-        End If
+    If g_iTotal = 0 Then
+        MsgBox "Aucun corps detecte dans le document.", vbInformation, "Verification Solide"
+        Exit Sub
     End If
 
-    If Not bError Then
-        g_sReport = g_sReport & "===============================" & Chr(13)
-
-        If g_bAllOK Then
-            g_sReport = g_sReport & "RESULTAT : Tous les corps sont SOLIDES et PLEINS."
-            iIcon = 64
-        Else
-            g_sReport = g_sReport & "RESULTAT : Probleme detecte !" & Chr(13) & _
-                        "Action   : Analyze > Check Geometry"
-            iIcon = 48
-        End If
-
-        MsgBox g_sReport, iIcon, "Verification Solide"
+    If g_bAllOK Then
+        sHeader = "RESULTAT : Tous les corps sont solides et pleins." & vbCrLf & _
+                  g_iTotal & " corps analyse(s) -- 0 defaut detecte." & vbCrLf & sSep
+        MsgBox sHeader, vbInformation, "Verification Solide"
+    Else
+        sHeader = "RESULTAT : Corps non conformes detectes !" & vbCrLf & _
+                  g_iBad & " corps en defaut sur " & g_iTotal & " analyse(s)." & vbCrLf & sSep
+        MsgBox sHeader & g_sReport, vbCritical, "Verification Solide"
     End If
 
-    If bError And sErrMsg <> "" Then
-        MsgBox sErrMsg & Chr(13) & "Verifiez que le Part est a jour (Ctrl+U).", _
-               16, "Verification Solide"
-    End If
-
-    Set g_oSPA  = Nothing
-    Set g_oPart = Nothing
-    Set oDoc    = Nothing
+    Set g_oSPA     = Nothing
+    Set g_oPart    = Nothing
+    Set g_oMainDoc = Nothing
+    Set oDoc       = Nothing
 
 End Sub

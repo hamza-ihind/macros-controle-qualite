@@ -19,16 +19,30 @@ Sub CATMain()
     ElseIf sType = "ProductDocument" Then
         ScanProduct oDoc.Product
     Else
-        MsgBox "Ouvrez un CATPart ou CATProduct.", vbExclamation
+        MsgBox "Type de document non pris en charge." & vbCrLf & _
+               "Veuillez ouvrir un fichier CATPart ou CATProduct.", _
+               vbExclamation, "Controle Auto-Intersection"
         Exit Sub
     End If
 
+    Dim sHeader As String
+    Dim sSep    As String
+    sSep = String(52, "-") & vbCrLf
+
     If gTotal = 0 Then
-        MsgBox "Aucune surface trouvee.", vbInformation
+        MsgBox "Aucune surface detectable n'a ete trouvee dans le document." & vbCrLf & _
+               "Verifiez que le document contient des corps geometriques.", _
+               vbInformation, "Controle Auto-Intersection"
     ElseIf gFailed = 0 Then
-        MsgBox "OK - " & gTotal & " surface(s) verifiee(s)." & vbCrLf & gReport, vbInformation
+        sHeader = "RESULTAT : Toutes les surfaces sont valides." & vbCrLf & _
+                  gTotal & " surface(s) analysee(s) -- 0 defaut detecte." & vbCrLf & _
+                  sSep
+        MsgBox sHeader & gReport, vbInformation, "Controle Auto-Intersection"
     Else
-        MsgBox gFailed & " auto-intersection(s) sur " & gTotal & " surface(s)." & vbCrLf & gReport, vbCritical
+        sHeader = "RESULTAT : Auto-intersection(s) detectee(s) !" & vbCrLf & _
+                  gFailed & " surface(s) en defaut sur " & gTotal & " analysee(s)." & vbCrLf & _
+                  sSep
+        MsgBox sHeader & gReport, vbCritical, "Controle Auto-Intersection"
     End If
 End Sub
 
@@ -116,11 +130,23 @@ Sub CheckSurface(oHS As HybridShape, oPart As Part)
     Err.Clear
     On Error GoTo 0
 
+    Dim sName   As String
+    Dim sPad    As String
+    Dim sStatus As String
+    sName = oHS.Name
+    If Len(sName) < 40 Then
+        sPad = Space(40 - Len(sName))
+    Else
+        sPad = " "
+    End If
+
     If bFailed Then
         gFailed = gFailed + 1
-        gReport = gReport & "[X] " & oHS.Name & vbCrLf
+        sStatus = "Auto-Intersectante"
+        gReport = gReport & "  " & sName & sPad & "-->  " & sStatus & vbCrLf
     Else
-        gReport = gReport & "[OK] " & oHS.Name & vbCrLf
+        sStatus = "OK"
+        gReport = gReport & "  " & sName & sPad & "-->  " & sStatus & vbCrLf
     End If
 
     On Error Resume Next
