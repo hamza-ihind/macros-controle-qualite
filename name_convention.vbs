@@ -9,7 +9,7 @@ Sub CATMain()
     rootComment = ""
 
     If docType = "PartDocument" Then
-        rootName = oDoc.Part.PartNumber
+        rootName = oDoc.Product.PartNumber
         On Error Resume Next
         rootComment = oDoc.Product.Comment
         On Error GoTo 0
