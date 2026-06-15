@@ -1,11 +1,11 @@
-Dim gTotal As Integer
-Dim gFailed As Integer
-Dim gReport As String
+Dim gTotal
+Dim gFailed
+Dim gReport
 
 ' Entry point: detects auto-intersecting surfaces in the active document.
 Sub CATMain()
-    Dim oDoc As Document
-    Dim sType As String
+    Dim oDoc
+    Dim sType
 
     gTotal  = 0
     gFailed = 0
@@ -25,8 +25,8 @@ Sub CATMain()
         Exit Sub
     End If
 
-    Dim sHeader As String
-    Dim sSep    As String
+    Dim sHeader
+    Dim sSep   
     sSep = String(52, "-") & vbCrLf
 
     If gTotal = 0 Then
@@ -47,11 +47,11 @@ Sub CATMain()
 End Sub
 
 ' Recursively scans a Product tree and processes each Part found.
-Sub ScanProduct(oProd As Product)
-    Dim i      As Integer
-    Dim oChild As Product
-    Dim oDoc   As Document
-    Dim sType  As String
+Sub ScanProduct(oProd)
+    Dim i     
+    Dim oChild
+    Dim oDoc  
+    Dim sType 
 
     For i = 1 To oProd.Products.Count
         Set oChild = oProd.Products.Item(i)
@@ -69,17 +69,17 @@ Sub ScanProduct(oProd As Product)
 End Sub
 
 ' Processes a Part's HybridBodies for auto-intersection checks.
-Sub ProcessPart(oPart As Part)
+Sub ProcessPart(oPart)
     If oPart.HybridBodies.Count > 0 Then
         ScanHybridBodies oPart.HybridBodies, oPart
     End If
 End Sub
 
 ' Iterates all HybridShapes (including nested bodies) and checks each one.
-Sub ScanHybridBodies(oHBs As HybridBodies, oPart As Part)
-    Dim oHB As HybridBody
-    Dim k   As Integer
-    Dim oHS As HybridShape
+Sub ScanHybridBodies(oHBs, oPart)
+    Dim oHB
+    Dim k  
+    Dim oHS
 
     For Each oHB In oHBs
         For k = 1 To oHB.HybridShapes.Count
@@ -93,16 +93,16 @@ Sub ScanHybridBodies(oHBs As HybridBodies, oPart As Part)
 End Sub
 
 ' Checks a single surface for auto-intersection using a temporary Join feature.
-Sub CheckSurface(oHS As HybridShape, oPart As Part)
-    Dim oSPA    As SPAWorkbench
-    Dim oRef    As Reference
-    Dim oMeas   As Measurable
-    Dim dArea   As Double
-    Dim oHSF    As HybridShapeFactory
-    Dim oTmpHB  As HybridBody
-    Dim oJoin   As HybridShapeAssemble
-    Dim oSel    As Selection
-    Dim bFailed As Boolean
+Sub CheckSurface(oHS, oPart)
+    Dim oSPA   
+    Dim oRef   
+    Dim oMeas  
+    Dim dArea  
+    Dim oHSF
+    Dim oTmpHB
+    Dim oJoin
+    Dim oSel
+    Dim bFailed
 
     dArea = 0
     On Error Resume Next
@@ -130,9 +130,9 @@ Sub CheckSurface(oHS As HybridShape, oPart As Part)
     Err.Clear
     On Error GoTo 0
 
-    Dim sName   As String
-    Dim sPad    As String
-    Dim sStatus As String
+    Dim sName  
+    Dim sPad   
+    Dim sStatus
     sName = oHS.Name
     If Len(sName) < 40 Then
         sPad = Space(40 - Len(sName))
